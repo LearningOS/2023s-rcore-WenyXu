@@ -14,8 +14,11 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -78,6 +81,7 @@ impl TaskManager {
     fn run_first_task(&self) -> ! {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
+        next_task.start_at = get_time_us().into();
         next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
@@ -133,6 +137,92 @@ impl TaskManager {
         inner.tasks[cur].change_program_brk(size)
     }
 
+    /// Remove framed area
+    pub fn remove_framed_area(&self, start_va: VirtAddr, end_va: VirtAddr) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+
+        inner.tasks[cur]
+            .memory_set
+            .remove_framed_area(start_va, end_va)
+    }
+
+    /// Insert framed area
+    pub fn insert_framed_area(&self, start_va: VirtAddr, end_va: VirtAddr, port: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let mut permission = MapPermission::U;
+
+        if port & 0x1 > 0 {
+            permission |= MapPermission::R;
+        }
+
+        if port & (0x1 << 1) > 0 {
+            permission |= MapPermission::W;
+        }
+
+        if port & (0x1 << 2) > 0 {
+            permission |= MapPermission::X;
+        }
+
+        inner.tasks[cur]
+            .memory_set
+            .insert_framed_area(start_va, end_va, permission)
+    }
+
+    /// Check range all mapped
+    pub fn check_range_all_mapped(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur]
+            .memory_set
+            .check_range_all_mapped(start_va, end_va)
+    }
+
+    /// Check range mapped
+    pub fn check_range_mapped(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur]
+            .memory_set
+            .check_range_mapped(start_va, end_va)
+    }
+
+    /// Update current task syscall times
+    pub fn update_current_task_syscall_times(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .syscall_times
+            .entry(syscall_id)
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
+    }
+
+    /// Get current task info
+    pub fn get_current_task_info(&self) -> (TaskStatus, [u32; MAX_SYSCALL_NUM], usize) {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        let mut syscall_times = [0; MAX_SYSCALL_NUM];
+
+        for (key, value) in &inner.tasks[current].syscall_times {
+            syscall_times[*key] = *value as u32;
+        }
+
+        let TaskControlBlock {
+            start_at,
+            task_status,
+            ..
+        } = inner.tasks[current];
+
+        (
+            task_status,
+            syscall_times,
+            (get_time_us() - start_at.expect("non-initialized task")) / 1000,
+        )
+    }
+
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -140,6 +230,14 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].start_at.is_none() {
+                inner.tasks[next].start_at = get_time_us().into();
+                println!(
+                    "run the next app: {} at {}",
+                    next,
+                    inner.tasks[next].start_at.unwrap()
+                );
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
