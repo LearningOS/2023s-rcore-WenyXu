@@ -21,7 +21,12 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::loader::get_app_data_by_name;
+use crate::{
+    config::MAX_SYSCALL_NUM,
+    loader::get_app_data_by_name,
+    mm::{MapPermission, VirtAddr},
+    timer::get_time_us,
+};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
@@ -35,6 +40,8 @@ pub use processor::{
     current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
     Processor,
 };
+
+use self::task::TaskControlBlockInner;
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
@@ -99,6 +106,80 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
     schedule(&mut _unused as *mut _);
+}
+
+/// Update current task syscall times
+pub fn update_current_task_syscall_times(syscall_id: usize) {
+    let task = current_task().unwrap();
+    task.inner_exclusive_access()
+        .syscall_times
+        .entry(syscall_id)
+        .and_modify(|v| *v += 1)
+        .or_insert(1);
+}
+
+/// Get current task info
+pub fn get_current_task_info() -> (TaskStatus, [u32; MAX_SYSCALL_NUM], usize) {
+    let task = current_task().unwrap();
+
+    let mut syscall_times = [0; MAX_SYSCALL_NUM];
+    let inner = task.inner_exclusive_access();
+    for (key, value) in &inner.syscall_times {
+        syscall_times[*key] = *value as u32;
+    }
+
+    (
+        inner.task_status,
+        syscall_times,
+        (get_time_us() - inner.start_at.expect("non-initialized task")) / 1000,
+    )
+}
+
+/// Remove framed area
+pub fn remove_framed_area(start_va: VirtAddr, end_va: VirtAddr) {
+    let task = current_task().unwrap();
+
+    let mut inner = task.inner_exclusive_access();
+    inner.memory_set.remove_framed_area(start_va, end_va)
+}
+
+/// Insert framed area
+pub fn insert_framed_area(start_va: VirtAddr, end_va: VirtAddr, port: usize) {
+    let mut permission = MapPermission::U;
+
+    if port & 0x1 > 0 {
+        permission |= MapPermission::R;
+    }
+
+    if port & (0x1 << 1) > 0 {
+        permission |= MapPermission::W;
+    }
+
+    if port & (0x1 << 2) > 0 {
+        permission |= MapPermission::X;
+    }
+    let task = current_task().unwrap();
+
+    let mut inner = task.inner_exclusive_access();
+    inner
+        .memory_set
+        .insert_framed_area(start_va, end_va, permission)
+}
+
+/// Check range all mapped
+pub fn check_range_all_mapped(start_va: VirtAddr, end_va: VirtAddr) -> bool {
+    let task = current_task().unwrap();
+
+    let inner = task.inner_exclusive_access();
+    inner.memory_set.check_range_all_mapped(start_va, end_va)
+}
+
+/// Check range mapped
+pub fn check_range_mapped(start_va: VirtAddr, end_va: VirtAddr) -> bool {
+    let task = current_task().unwrap();
+
+    let inner = task.inner_exclusive_access();
+    inner.memory_set.check_range_mapped(start_va, end_va)
 }
 
 lazy_static! {
