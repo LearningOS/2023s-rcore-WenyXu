@@ -41,7 +41,11 @@ pub use processor::{
     Processor,
 };
 
-use self::task::TaskControlBlockInner;
+/// Big stride
+pub const BIG_STRIDE: u64 = 1 << 40;
+/// Default priority
+pub const DEFAULT_PRIO: usize = 16;
+
 /// Suspend the current 'Running' task and run the next task in task list.
 pub fn suspend_current_and_run_next() {
     // There must be an application running.

@@ -25,6 +25,18 @@ impl TaskManager {
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.ready_queue.pop_front()
     }
+
+    /// Return a task has the min stride
+    pub fn min(&mut self) -> Option<Arc<TaskControlBlock>> {
+        let (idx, _task) = self
+            .ready_queue
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, task)| task.inner_exclusive_access().stride)
+            .unwrap();
+
+        self.ready_queue.remove(idx)
+    }
 }
 
 lazy_static! {
@@ -43,4 +55,10 @@ pub fn add_task(task: Arc<TaskControlBlock>) {
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
     //trace!("kernel: TaskManager::fetch_task");
     TASK_MANAGER.exclusive_access().fetch()
+}
+
+/// Take a process out of the ready queue
+pub fn fetch_min_tride_task() -> Option<Arc<TaskControlBlock>> {
+    //trace!("kernel: TaskManager::fetch_task");
+    TASK_MANAGER.exclusive_access().min()
 }

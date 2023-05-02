@@ -1,6 +1,6 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::TaskContext;
-use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
+use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle, BIG_STRIDE};
+use super::{TaskContext, DEFAULT_PRIO};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
@@ -34,6 +34,11 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
+    }
+    /// Update the stride
+    pub fn update_stride(&self) {
+        let mut inner = self.inner.exclusive_access();
+        inner.stride += BIG_STRIDE / inner.priority as u64;
     }
 }
 
@@ -75,6 +80,12 @@ pub struct TaskControlBlockInner {
 
     /// The syscall times
     pub syscall_times: BTreeMap<usize, usize>,
+
+    /// The stride
+    pub stride: u64,
+
+    /// The task priority
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -127,6 +138,8 @@ impl TaskControlBlock {
                     program_brk: user_sp,
                     start_at: None,
                     syscall_times: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIO,
                 })
             },
         };
@@ -202,6 +215,8 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     start_at: None,
                     syscall_times: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIO,
                 })
             },
         });
