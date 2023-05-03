@@ -1,5 +1,5 @@
 //!Stdin & Stdout
-use super::File;
+use super::{AsInode, File};
 use crate::mm::UserBuffer;
 use crate::sbi::console_getchar;
 use crate::task::suspend_current_and_run_next;
@@ -9,6 +9,12 @@ pub struct Stdin;
 
 /// stdout file for putting chars to console
 pub struct Stdout;
+
+impl AsInode for Stdin {
+    fn as_inode(&self) -> Option<(usize, usize)> {
+        None
+    }
+}
 
 impl File for Stdin {
     fn readable(&self) -> bool {
@@ -38,6 +44,12 @@ impl File for Stdin {
     }
     fn write(&self, _user_buf: UserBuffer) -> usize {
         panic!("Cannot write to stdin!");
+    }
+}
+
+impl AsInode for Stdout {
+    fn as_inode(&self) -> Option<(usize, usize)> {
+        None
     }
 }
 

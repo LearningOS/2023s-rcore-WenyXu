@@ -4,14 +4,14 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{AsInode, File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
-use easy_fs::{EasyFileSystem, Inode};
+use easy_fs::{DiskInodeType, EasyFileSystem, Inode};
 use lazy_static::*;
 
 /// inode in memory
@@ -121,6 +121,46 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
             }
             Arc::new(OSInode::new(readable, writable, inode))
         })
+    }
+}
+
+/// Create a hard link
+pub fn link(oldpath: &str, newpath: &str) -> isize {
+    if let Some(_) = ROOT_INODE.link(oldpath, newpath) {
+        0
+    } else {
+        -1
+    }
+}
+
+/// Remove a hard link
+pub fn unlink(path: &str) -> isize {
+    ROOT_INODE.unlink(path)
+}
+
+/// Stat a path
+pub fn stat(block_id: usize, block_offest: usize) -> Stat {
+    trace!("fs: stat");
+    let (inode_id, nlink, type_) = ROOT_INODE.stat(block_id, block_offest);
+
+    let mode = match type_ {
+        DiskInodeType::File => StatMode::FILE,
+        DiskInodeType::Directory => StatMode::DIR,
+    };
+
+    Stat {
+        dev: 0,
+        ino: inode_id as u64,
+        mode,
+        nlink: nlink,
+        pad: [0; 7],
+    }
+}
+
+impl AsInode for OSInode {
+    fn as_inode(&self) -> Option<(usize, usize)> {
+        let inner = self.inner.exclusive_access();
+        Some((inner.inode.block_id, inner.inode.block_offset))
     }
 }
 

@@ -6,6 +6,7 @@ use super::{
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use log::trace;
 use spin::{Mutex, MutexGuard};
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
@@ -117,6 +118,7 @@ impl Inode {
 
     /// Stat a file
     pub fn stat(&self, block_id: usize, block_offset: usize) -> (u32, u32, DiskInodeType) {
+        trace!("easy-fs: stat ({block_id},{block_offset})");
         let fs = self.fs.lock();
         let inode_id = fs.get_inode(block_id as u32, block_offset);
         let mut nlink = 0;
@@ -133,6 +135,7 @@ impl Inode {
 
     /// Remove a hard link
     pub fn unlink(&self, path: &str) -> isize {
+        trace!("easy-fs: unlink: {path}");
         let mut fs = self.fs.lock();
         let op = |root_inode: &DiskInode| {
             // assert it is a directory
@@ -173,6 +176,7 @@ impl Inode {
 
     /// Create a hard link
     pub fn link(&self, oldpath: &str, newpath: &str) -> Option<Arc<Inode>> {
+        trace!("easy-fs: link: {oldpath}->{newpath}");
         let mut fs = self.fs.lock();
         let op = |root_inode: &DiskInode| {
             // assert it is a directory
@@ -202,7 +206,6 @@ impl Inode {
                     dirent.as_bytes(),
                     &self.block_device,
                 );
-                fs.dealloc_inode(inode_id as usize);
             });
 
             let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);

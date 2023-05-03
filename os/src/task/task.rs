@@ -66,6 +66,7 @@ pub struct TaskControlBlockInner {
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub fd_map: BTreeMap<usize, (usize, usize)>,
 
     /// Heap bottom
     pub heap_bottom: usize,
@@ -146,6 +147,7 @@ impl TaskControlBlock {
                         // 2 -> stderr
                         Some(Arc::new(Stdout)),
                     ],
+                    fd_map: BTreeMap::new(),
                     heap_bottom: user_sp,
                     program_brk: user_sp,
                     start_at: None,
@@ -231,6 +233,7 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    fd_map: BTreeMap::new(),
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
                     start_at: None,

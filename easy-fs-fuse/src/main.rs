@@ -168,6 +168,7 @@ fn test_link() -> std::io::Result<()> {
     let fileb = root_inode.link("filea", "fileb").unwrap();
     assert_eq!(filea.block_id, fileb.block_id);
     assert_eq!(filea.block_offset, fileb.block_offset);
+    root_inode.link("filea", "filec").unwrap();
 
     let fileb = root_inode.find("fileb").unwrap();
     assert_eq!(filea.block_id, fileb.block_id);
