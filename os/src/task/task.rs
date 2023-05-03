@@ -1,11 +1,12 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
+use super::{TaskContext, DEFAULT_PRIO};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -71,6 +72,18 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// The start time (us)
+    pub start_at: Option<usize>,
+
+    /// The syscall times
+    pub syscall_times: BTreeMap<usize, usize>,
+
+    /// The stride
+    pub stride: u64,
+
+    /// The task priority
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +148,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_at: None,
+                    syscall_times: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIO,
                 })
             },
         };
@@ -216,6 +233,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_at: None,
+                    syscall_times: BTreeMap::new(),
+                    stride: 0,
+                    priority: DEFAULT_PRIO,
                 })
             },
         });
