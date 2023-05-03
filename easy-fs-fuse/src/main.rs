@@ -149,3 +149,89 @@ fn efs_test() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_link() -> std::io::Result<()> {
+    let block_file = Arc::new(BlockFile(Mutex::new({
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open("target/fs.img")?;
+        f.set_len(8192 * 512).unwrap();
+        f
+    })));
+    EasyFileSystem::create(block_file.clone(), 4096, 1);
+    let efs = EasyFileSystem::open(block_file.clone());
+    let root_inode = EasyFileSystem::root_inode(&efs);
+    let filea = root_inode.create("filea").unwrap();
+    let fileb = root_inode.link("filea", "fileb").unwrap();
+    assert_eq!(filea.block_id, fileb.block_id);
+    assert_eq!(filea.block_offset, fileb.block_offset);
+
+    let fileb = root_inode.find("fileb").unwrap();
+    assert_eq!(filea.block_id, fileb.block_id);
+    assert_eq!(filea.block_offset, fileb.block_offset);
+
+    Ok(())
+}
+
+#[test]
+fn test_unlink() -> std::io::Result<()> {
+    let block_file = Arc::new(BlockFile(Mutex::new({
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open("target/fs.img")?;
+        f.set_len(8192 * 512).unwrap();
+        f
+    })));
+    EasyFileSystem::create(block_file.clone(), 4096, 1);
+    let efs = EasyFileSystem::open(block_file.clone());
+    let root_inode = EasyFileSystem::root_inode(&efs);
+    root_inode.create("filea").unwrap();
+    root_inode.link("filea", "fileb").unwrap();
+
+    let filea = root_inode.find("filea").unwrap();
+    let stat = root_inode.stat(filea.block_id, filea.block_offset);
+    assert_eq!(stat.1, 2);
+
+    assert_eq!(root_inode.unlink("fileb"), 0);
+    assert!(root_inode.find("fileb").is_none());
+
+    let filea = root_inode.find("filea").unwrap();
+    let stat = root_inode.stat(filea.block_id, filea.block_offset);
+    assert_eq!(stat.1, 1);
+
+    assert_eq!(root_inode.unlink("filea"), 0);
+    assert!(root_inode.find("filea").is_none());
+
+    Ok(())
+}
+
+#[test]
+fn test_unlink_2() -> std::io::Result<()> {
+    let block_file = Arc::new(BlockFile(Mutex::new({
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open("target/fs.img")?;
+        f.set_len(8192 * 512).unwrap();
+        f
+    })));
+    EasyFileSystem::create(block_file.clone(), 4096, 1);
+    let efs = EasyFileSystem::open(block_file.clone());
+    let root_inode = EasyFileSystem::root_inode(&efs);
+
+    let fname = "fname3";
+
+    for _ in 0..10 {
+        root_inode.create(fname).unwrap();
+
+        assert_eq!(root_inode.unlink(fname), 0);
+    }
+
+    Ok(())
+}

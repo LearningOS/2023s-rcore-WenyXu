@@ -121,6 +121,14 @@ impl EasyFileSystem {
             (inode_id % inodes_per_block) as usize * inode_size,
         )
     }
+
+    /// Get inode
+    pub fn get_inode(&self, block_id: u32, offest: usize) -> u32 {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+
+        block_id * inodes_per_block - self.inode_area_start_block + (offest / inode_size) as u32
+    }
     /// Get data block by id
     pub fn get_data_block_id(&self, data_block_id: u32) -> u32 {
         self.data_area_start_block + data_block_id
@@ -128,6 +136,11 @@ impl EasyFileSystem {
     /// Allocate a new inode
     pub fn alloc_inode(&mut self) -> u32 {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
+    }
+
+    /// Deallocate a new inode
+    pub fn dealloc_inode(&mut self, bit: usize) {
+        self.inode_bitmap.dealloc(&self.block_device, bit);
     }
 
     /// Allocate a data block
