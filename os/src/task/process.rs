@@ -8,7 +8,9 @@ use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
+use crate::syscall::{MAX_LOCK_NUM, MAX_THREAD_NUM};
 use crate::trap::{trap_handler, TrapContext};
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -49,9 +51,139 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// avaliable lock resources
+    pub available: BTreeMap<usize, usize>,
+    /// allocation per thread
+    pub allocation: [[usize; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+    /// need per thread
+    pub need: [[usize; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+    /// deadlock detect flag
+    pub enable_deadlock_detect: bool,
 }
 
 impl ProcessControlBlockInner {
+    /// returns true if the thread is safe for acquiring locks
+    pub fn allow_acquiring(&self, _current_tid: usize) -> bool {
+        if self.enable_deadlock_detect == false {
+            return true;
+        }
+
+        let mut work = self.available.clone();
+        debug!("all available: {:?}", self.available);
+        debug!("all need: {:?}", self.need);
+        debug!("all alloc: {:?}", self.allocation);
+        let thread_count = self.thread_count();
+        let res_count = self.mutex_list.len().max(self.semaphore_list.len());
+        let mut finish = vec![false; thread_count];
+        loop {
+            let mut tid = None;
+            for thread in 0..thread_count {
+                if finish[thread] {
+                    // go ahead if thread finshed
+                    continue;
+                }
+                let mut found = true;
+
+                for res in 0..res_count {
+                    // Finish[i] == false && Need[i,j] ≤ Work[j];
+                    let need = self.need[thread][res];
+                    let work_res = work.get(&res).cloned().unwrap_or_default();
+                    if need <= work_res {
+                        found &= true;
+                    } else {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if found {
+                    tid = Some(thread);
+                    break;
+                }
+            }
+
+            if let Some(tid) = tid {
+                debug!("found tid:{}", tid);
+                for res in 0..res_count {
+                    let reclaim = self.allocation[tid][res];
+                    // The thread is safe for acquiring locks
+                    if reclaim > 0 {
+                        work.entry(res)
+                            .and_modify(|v: &mut usize| *v += reclaim)
+                            .or_insert(reclaim);
+                        debug!("work update need: {} +{} {:?}", res, reclaim, work);
+                    }
+                    finish[tid] = true;
+                }
+            } else {
+                break;
+            }
+        }
+
+        debug!("finish {:?}", finish);
+        finish.iter().all(|x| *x)
+    }
+
+    /// increase allocation counter
+    pub fn inc_alloc(&mut self, tid: usize, res_id: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("inc alloc: {} +{}", res_id, 1);
+        self.allocation[tid][res_id] += 1
+    }
+
+    /// increase allocation counter
+    pub fn dec_alloc(&mut self, tid: usize, res_id: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("dec alloc: {} -{}", res_id, 1);
+        self.allocation[tid][res_id] -= 1
+    }
+
+    /// increase need counter
+    pub fn inc_need(&mut self, tid: usize, res_id: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("inc need: {} +{}", res_id, 1);
+        self.need[tid][res_id] += 1
+    }
+
+    /// decrease need counter
+    pub fn dec_need(&mut self, tid: usize, res_id: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("dec need: {} -{}", res_id, 1);
+        self.need[tid][res_id] -= 1
+    }
+
+    /// increase available counter
+    pub fn inc_available(&mut self, id: usize, count: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("inc available: {} +{}", id, count);
+        self.available
+            .entry(id)
+            .and_modify(|v| *v += count)
+            .or_insert(count);
+    }
+
+    /// decrease available counter
+    pub fn dec_available(&mut self, id: usize, count: usize) {
+        if self.enable_deadlock_detect == false {
+            return;
+        }
+        debug!("dec available: {} -{}", id, count);
+        self.available
+            .entry(id)
+            .and_modify(|v| *v -= count)
+            .or_insert(0);
+    }
+
     #[allow(unused)]
     /// get the address of app's page table
     pub fn get_user_token(&self) -> usize {
@@ -119,6 +251,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    available: BTreeMap::new(),
+                    allocation: [[0; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+                    need: [[0; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+                    enable_deadlock_detect: false,
                 })
             },
         });
@@ -245,6 +381,10 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    available: BTreeMap::new(),
+                    allocation: [[0; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+                    need: [[0; MAX_LOCK_NUM]; MAX_THREAD_NUM],
+                    enable_deadlock_detect: false,
                 })
             },
         });

@@ -101,6 +101,11 @@ pub const SYSCALL_CONDVAR_SIGNAL: usize = 472;
 /// condvar_wait syscallca
 pub const SYSCALL_CONDVAR_WAIT: usize = 473;
 
+/// max lock num
+pub const MAX_LOCK_NUM: usize = 16;
+/// max thread num
+pub const MAX_THREAD_NUM: usize = 8;
+
 mod fs;
 mod process;
 mod sync;
@@ -110,6 +115,7 @@ use fs::*;
 use process::*;
 use sync::*;
 use thread::*;
+mod utils;
 
 use crate::fs::Stat;
 
